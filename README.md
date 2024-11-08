@@ -110,7 +110,7 @@ Example:
 
 The global score for each team is calculated as:
 ```
-Global Score = Σ (Competition_Score × Competition_Weight)
+Global Score = Σ (1 / Competition_ranking × Competition_Weight)
 ```
 
 ### Real-time Updates
