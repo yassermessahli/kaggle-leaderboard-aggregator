@@ -11,6 +11,8 @@ This project has been successfully migrated from `Django` to `Flask` framework, 
 - **Easier Deployment**: Simplified configuration and setup process
 - **Better Resource Usage**: More efficient memory management
 
+![screenshot](https://github.com/yassermessahli/kaggle-leaderboard-aggregator/blob/main/assets/images/screenshot.png)
+
 ## ✨ New Features
 
 Since the migration, we've added several enhancements:
