@@ -3,35 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Train-it leaderboard</title>
-    <script>
-        // Function to reload the page
-        function reloadPage() {
-            location.reload();
+    <title>Global Leaderboard</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <style>
+        @keyframes slideIn {
+            from {
+                transform: translateX(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
-    
-        // Set interval to reload the page at regular intervals
-        setInterval(reloadPage, 20000); // Refresh every 20 seconds
-    </script>
+        
+        .slide-in {
+            animation: slideIn 0.5s ease-out forwards;
+        }
+        
+        .team-row {
+            opacity: 0;
+        }
+        
+        .score-bar {
+            transition: width 1s ease-out;
+        }
+        
+        .hover-effect:hover {
+            transform: scale(1.02);
+            transition: transform 0.3s ease;
+        }
+
+        .countdown {
+            font-variant-numeric: tabular-nums;
+        }
+    </style>
 </head>
-<body>
-    <h1>Leaderboard</h1>
-    <table>
-        <tr>
-            <th>Rank</th>
-            <th>Team</th>
-            {% for c in competitions %}
-                <th>{{ c }}</th>
-            {% endfor %}
-        </tr>
-        {% for team in global_rank %}
-            <tr>
-                <td>{{ team.rank }}</td>
-                <td>{{ team.team }}</td>
-                {% for r in team.all_ranks.values %}
-                    <td>{{ r }}</td>
-                {% endfor %}
-            </tr>
-        {% endfor %}
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="text-center mb-12">
+            <h1 class="text-4xl font-bold mb-4">{{competition_name}}</h1>
+            <div class="mb-4">
+                <div id="competition-status" class="text-xl font-semibold mb-2">
+                    {% if competition_status.has_ended %}
+                        <span class="text-red-500">Competition Ended</span>
+                    {% elif not competition_status.has_started %}
+                        <span class="text-yellow-500">Competition Starting Soon</span>
+                    {% else %}
+                        <span class="text-green-500">Competition in Progress</span>
+                    {% endif %}
+                </div>
+                <div id="countdown" class="countdown text-2xl font-mono"></div>
+            </div>
+            <p class="text-gray-400">Last updated: {{ last_update }}</p>
+        </header>
+
+        <!-- Rest of your existing table code remains the same -->
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6">
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-gray-700">
+                            <th class="px-4 py-3 text-left">Rank</th>
+                            <th class="px-4 py-3 text-left">Team</th>
+                            <th class="px-4 py-3 text-right">Global Score</th>
+                            {% for competition in competitions %}
+                            <th class="px-4 py-3 text-right">{{ competition }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in rankings %}
+                        <tr class="team-row hover-effect border-b border-gray-700"
+                            style="animation-delay: {{ loop.index * 100 }}ms">
+                            <td class="px-4 py-3">
+                                <span class="inline-flex items-center justify-center w-8 h-8 rounded-full 
+                                           {% if loop.index == 1 %}bg-yellow-500{% elif loop.index == 2 %}bg-gray-400
+                                           {% elif loop.index == 3 %}bg-yellow-700{% else %}bg-gray-700{% endif %}">
+                                    {{ team.rank }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 font-medium">{{ team.team }}</td>
+                            <td class="px-4 py-3 text-right">
+                                <div class="flex items-center justify-end">
+                                    <div class="w-32 bg-gray-700 rounded-full h-2 mr-3">
+                                        <div class="score-bar bg-blue-500 rounded-full h-2"
+                                             style="width: {{ (team.score / rankings[0].score * 100)|round }}%"></div>
+                                    </div>
+                                    {{ "%.2f"|format(team.score) }}
+                                </div>
+                            </td>
+                            {% for competition in competitions %}
+                            <td class="px-4 py-3 text-right">
+                                {{ team.all_ranks[competition] }}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Animation for rows
+        document.addEventListener('DOMContentLoaded', function() {
+            const rows = document.querySelectorAll('.team-row');
+            rows.forEach((row, index) => {
+                setTimeout(() => {
+                    row.classList.add('slide-in');
+                }, index * 100);
+            });
+
+            // Countdown timer
+            const startTime = new Date('{{ competition_status.start_time }}').getTime();
+            const endTime = new Date('{{ competition_status.end_time }}').getTime();
+            
+            function updateCountdown() {
+                const now = new Date().getTime();
+                let targetTime, prefix;
+                
+                if (now < startTime) {
+                    targetTime = startTime;
+                    prefix = "Competition starts in: ";
+                } else if (now < endTime) {
+                    targetTime = endTime;
+                    prefix = "Time remaining: ";
+                } else {
+                    document.getElementById('countdown').textContent = "Competition has ended";
+                    return;
+                }
+                
+                const distance = targetTime - now;
+                
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                
+                document.getElementById('countdown').textContent = 
+                    `${prefix}${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+            
+            // Update every second
+            updateCountdown();
+            setInterval(updateCountdown, 1000);
+        });
+    </script>
 </body>
 </html>

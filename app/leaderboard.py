@@ -1,86 +1,100 @@
 from kaggle import KaggleApi
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Dict, Any
+import threading
 
-# Authentication
-# NOTE: You need to have a Kaggle account and a Kaggle API token to use this code.
-# read the laggle API documentation for more information on how to setup your API token through the following link:
-# https://github.com/Kaggle/kaggle-api
-api = KaggleApi()
-api.authenticate()
+class LeaderboardManager:
+    def __init__(self):
+        self.api = KaggleApi()
+        self.api.authenticate()
+        self._cache_lock = threading.Lock()
+        self._competition_cache: Dict[str, List[Dict]] = {}
+        
+    @lru_cache(maxsize=32)
+    def fetch_competition_leaderboard(self, competition: str) -> List[Dict]:
+        """
+        Fetch and cache the leaderboard data of a single competition.
+        Uses lru_cache for memory-efficient caching.
+        """
+        if competition in self._competition_cache:
+            return self._competition_cache[competition]
+            
+        results = self.api.competition_leaderboard_view(competition=competition)
+        result_fields = ["teamId", "teamName", "submissionDate", "score"]
+        
+        leaderboard = [
+            {
+                "rank": i + 1,
+                **{f: str(getattr(result, f)) for f in result_fields}
+            }
+            for i, result in enumerate(results)
+        ]
+        
+        with self._cache_lock:
+            self._competition_cache[competition] = leaderboard
+        
+        return leaderboard
 
-
-def fetch_competition_leaderboard(competition: str):
-    """
-    Fetch the leaderboard data of a single competition.
-    """
-    results = api.competition_leaderboard_view(competition=competition)
-    result_fields = ["teamId", "teamName", "submissionDate", "score"]
-
-    leaderboard = []
-
-    for i in range(len(results)):
-        team = {}
-        team["rank"] = i + 1
-        for f in result_fields:
-            team[f] = str(getattr(results[i], f))
-        leaderboard.append(team)
-
-    return leaderboard
-
-
-def get_all_ranks(team: str, competitions: list):
-    """
-    Get all ranks of a team in a list of competitions, in a form of a dictionary.
-    """
-    result = {}
-    result["team"] = team
-    ranks = {}
-    for c in competitions:
-        results = fetch_competition_leaderboard(c)
+    def _get_team_rank(self, team: str, competition: str) -> int:
+        """
+        Helper function to get a team's rank in a specific competition.
+        """
+        results = self.fetch_competition_leaderboard(competition)
         for r in results:
             if r["teamName"] == team:
-                ranks[c] = r["rank"]
-                break
-        if c not in ranks.keys():
-            ranks[c] = len(results) + 1
-    result["ranks"] = ranks
-    return result
+                return r["rank"]
+        return len(results) + 1
 
+    def get_all_ranks(self, team: str, competitions: List[str]) -> Dict:
+        """
+        Get all ranks of a team in a list of competitions using parallel processing.
+        """
+        with ThreadPoolExecutor() as executor:
+            ranks = {
+                comp: rank for comp, rank in 
+                zip(competitions, executor.map(
+                    lambda c: self._get_team_rank(team, c), 
+                    competitions
+                ))
+            }
+            
+        return {"team": team, "ranks": ranks}
 
-def calculate_global_rank(teams: list, competitions: list, weights: list):
-    """
-    function to calculate the global rank of a team based on its ranks in a list of competitions
-    `NOTE`: this function is specific in our competition's scoring system, you may need to adjust it based on your competition
+    def calculate_global_rank(self, teams: List[str], competitions: List[str], weights: List[float]) -> List[Dict]:
+        """
+        Calculate global ranks for all teams using parallel processing and caching.
+        """
+        if len(competitions) != len(weights):
+            raise ValueError("The competitions list and weights list must have the same length.")
+        if abs(sum(weights) - 100) > 0.001:  # Using small epsilon for float comparison
+            raise ValueError("The sum of weights must be equal to 100.")
 
-    """
+        # Pre-fetch all competition leaderboards in parallel
+        with ThreadPoolExecutor() as executor:
+            executor.map(self.fetch_competition_leaderboard, competitions)
+        
+        # Calculate ranks for all teams in parallel
+        with ThreadPoolExecutor() as executor:
+            team_ranks = list(executor.map(
+                lambda t: (t, self.get_all_ranks(t, competitions)), 
+                teams
+            ))
 
-    # each competition has a weight. the competitions list must have the same length as the weights list
-    if len(competitions) != len(weights):
-        raise ValueError(
-            "The competitions list and the weights list must have the same length."
-        )
-    # the sum of weights must be equal to 100 (specific to our competition scoring system)
-    if sum(weights) != 100:
-        raise ValueError("The sum of weights must be equal to 100.")
+        # Calculate global scores
+        global_rank = []
+        for team, ranks_data in team_ranks:
+            ranks = ranks_data["ranks"]
+            score = sum(1 / ranks[c] * w for c, w in zip(competitions, weights))
+            global_rank.append({
+                "team": team,
+                "score": score,
+                "all_ranks": ranks
+            })
 
-    # more the weight is high more the competition is important
-    # calculating the global score of each team
-    global_rank = []
-    for t in teams:
-        # get all ranks of the team in the competitions
-        ranks = get_all_ranks(t, competitions)["ranks"]
+        # Sort and add final ranks
+        global_rank.sort(key=lambda x: x["score"], reverse=True)
+        for i, entry in enumerate(global_rank):
+            entry["rank"] = i + 1
 
-        # calculate the score of the team
-        score = 0
-        for c, w in zip(competitions, weights):
-            score += 1 / ranks[c] * w
-
-        # append the team to the global rank
-        global_rank.append({"team": t, "score": score, "all_ranks": ranks})
-
-    # sort the global rank based on the score
-    global_rank = sorted(global_rank, key=lambda x: x["score"], reverse=True)
-    # add ranks to the global rank
-    for i, r in enumerate(global_rank):
-        global_rank[i]["rank"] = i + 1
-
-    return global_rank
+        return global_rank

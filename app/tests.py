@@ -1,3 +1,12 @@
-from django.test import TestCase
+from leaderboard import LeaderboardManager
+from config import COMPETITION_CONFIG
+import pprint
 
-# Create your tests here.
+
+lb_manager = LeaderboardManager()
+
+pprint.pprint(lb_manager.calculate_global_rank(
+    COMPETITION_CONFIG["teams"],
+    COMPETITION_CONFIG["competitions"],
+    COMPETITION_CONFIG["weights"]
+))
